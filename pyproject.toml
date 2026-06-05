@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=69", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowstate"
+version = "0.1.0"
+description = "Cell fate trajectory inference from time-resolved metabolic RNA labeling data"
+authors =  ["Anna AUDIT, "Gabriel Peyré", "Laura Cantini"]
+readme = "README.md"
+
+license = {file = "LICENSE"}
+
+authors = [
+    {name = "Anna Audit"}
+]
+
+dependencies = [
+    python = "^3.10"
+anndata = "^0.10.7"
+jaxlib = "0.4.26"
+jax = "0.4.26"
+optax = "^0.2.2"
+flax = "0.8.2"
+jaxopt = "^0.8.3"
+numpy = "^1.26.4"
+tqdm = "^4.66.2"
+ott-jax = "0.4.6"
+orbax-checkpoint = "^0.5.20"
+scikit-learn = "^1.5.1"
+seaborn = "^0.13.2"
+cellrank = "^2.0.4"
+]
+
+
