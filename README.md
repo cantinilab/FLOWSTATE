@@ -9,3 +9,5 @@ This folder contains the code used to train, evaluate, and analyze dynamical mod
 
 ## Getting started
 FlOWSTATE takes as an input an AnnData object, where omics information and labeled RNA information are stored in `obsm`, and `obs` contains time information, 
+
+The code to reproduce the figure of the paper can be found here https://github.com/cantinilab/FLOWSTATE_reproducibility
