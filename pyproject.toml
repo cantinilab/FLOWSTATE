@@ -6,30 +6,32 @@ build-backend = "setuptools.build_meta"
 name = "flowstate"
 version = "0.1.0"
 description = "Cell fate trajectory inference from time-resolved metabolic RNA labeling data"
-authors =  ["Anna AUDIT, "Gabriel Peyré", "Laura Cantini"]
-
-
-license = {file = "LICENSE"}
-
 authors = [
-    {name = "Anna Audit"}
+    { name = "Anna AUDIT" },
+    { name = "Gabriel Peyré" },
+    { name = "Laura Cantini" },
 ]
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.10,<4.0"
 
 dependencies = [
-    python = "^3.10"
-    anndata = "^0.10.7"
-    jaxlib = "0.4.26"
-    jax = "0.4.26"
-    optax = "^0.2.2"
-    flax = "0.8.2"
-    jaxopt = "^0.8.3"
-    numpy = "^1.26.4"
-    tqdm = "^4.66.2"
-    ott-jax = "0.4.6"
-    orbax-checkpoint = "^0.5.20"
-    scikit-learn = "^1.5.1"
-    seaborn = "^0.13.2"
-    cellrank = "^2.0.4"
+    "anndata>=0.10.7,<0.11.0",
+    "jaxlib==0.4.30",
+    "jax==0.4.30",
+    "optax>=0.2.2,<0.3.0",
+    "flax==0.8.5",
+    "jaxopt>=0.8.3,<0.9.0",
+    "numpy>=1.26.4,<2.0.0",
+    "tqdm>=4.66.2,<5.0.0",
+    "ott-jax==0.4.7",
+    "orbax-checkpoint>=0.5.20,<0.6.0",
+    "scikit-learn>=1.5.1,<2.0.0",
+    "seaborn>=0.13.2,<0.14.0",
+    "cellrank>=2.0.4,<3.0.0",
+    "plotly>=6.3.1,<7.0.0",
 ]
+[tool.setuptools.packages.find]
+include = ["flowstate*"]
 
 

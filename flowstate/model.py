@@ -14,7 +14,7 @@ from jax._src.random import KeyArray
 from optax import GradientTransformation
 from orbax.checkpoint import CheckpointManager
 from tqdm import tqdm
-
+from typing import Sequence
 from .steps.proximal_step import ProximalStep
 from .steps.explicit import ExplicitStep
 from .potentials import MLPPotential
@@ -42,10 +42,11 @@ class FlowState:
     n_steps: int = 1
     teacher_forcing: bool = True
     debias: bool = True
-    epsilon: float = 0.05
+    epsilon: float = 0.01
+    l: float = None
     log_callback: Callable | None = None
-    fused_penalty: float = 5.0
-    
+   
+  
     
 
     def fit(
@@ -53,20 +54,17 @@ class FlowState:
         adata: AnnData,
         time_key: str,
         omics_key: str, 
-        old_omics_key : str | None = None,
+        velo_omics_key : str | None = None,
         weight_key: str | None = None,
         optimizer: GradientTransformation = optax.adamw(1e-2),
-        max_iter: int = 10_000,
-        batch_size: int = 1_000,
-        full_batch : bool = False,
+        max_iter: int = 15_000,
+        batch_size: int = 0.15,
         train_val_split: float = 0.75,
         min_delta: float = 0.0,
         patience: int = 150,
         checkpoint_manager: CheckpointManager | None = None,
         key: KeyArray = PRNGKey(0),
-        exclude_last : bool = True,
-        new_loss : bool = False,
-        l : int = 1,
+        exclude_last : bool = False,
         time_old : jax.Array = None,
         velo : str = "accumulated",
     ) -> None:
@@ -85,23 +83,25 @@ class FlowState:
             checkpoint_manager (CheckpointManager, optional): The checkpoint manager.
             key (KeyArray, optional): The random key. Defaults to PRNGKey(0).
         """
-        print("in the general loss file ")
+       
+       
         # Initialize the statistics for logging.
         self.train_it, self.train_losses = [], []
         self.val_it, self.val_losses = [], []
-        
+
+        new_loss = (self.l is not None) 
+       
         # Create a data loader for the AnnData object.
         dataloader = DataLoader(
             adata,
             time_key=time_key,
             omics_key=omics_key,
-            old_omics_key=old_omics_key,
+            velo_omics_key=velo_omics_key,
             weight_key=weight_key,
             batch_size=batch_size,
             train_val_split=train_val_split,
             exclude_last=exclude_last, 
             new_loss = new_loss,
-            full_batch=full_batch
 
         )
 
@@ -116,7 +116,7 @@ class FlowState:
         lkwargs = {**lkwargs, "debias": self.debias}
         lkwargs = {**lkwargs, "n_steps": self.n_steps, "epsilon": self.epsilon}
         lkwargs = {**lkwargs, "proximal_step": self.proximal_step}
-        lkwargs = {**lkwargs, "new_loss": new_loss, "l" : l , "time_old" : time_old, "velo" : velo}
+        lkwargs = {**lkwargs, "new_loss": new_loss, "l" : self.l , "time_old" : time_old, "velo" : velo}
        
         
         @jax.jit

@@ -86,7 +86,7 @@ class ProximalStep(ABC):
 
         y = x.copy()
         for _ in range(n_steps):
-            y = self.inference_step(y, a, potential_fun, 1 / n_steps)
+            y = self.inference_step(y, a, potential_fun)
         return y
 
     def chained_training_steps(

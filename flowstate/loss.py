@@ -90,7 +90,7 @@ def loss_fn(
         n_steps: The number of steps to take.
         epsilon: Entropic regularization parameter.
         debias: Whether to debias the loss (see linear_loss or quadratic_loss).
-        fused_penalty: Parameter indicting weight of the fused term.
+        
 
     Returns:
         The loss and the data for the next iteration ( pred if no teacher forcing and grounfd truth if teacher forcing) 
@@ -105,8 +105,7 @@ def loss_fn(
         # Predict the timepoint t+1 using the proximal step.
         
         pred_x = proximal_step.chained_training_steps(_x[t], _a[t], potential, params, n_steps)
-        #pred_x = proximal_step.chained_training_steps(_x[t], _a[t], potential, params, 1, n_steps)
-        
+      
         ot_loss = linear_loss(
                 x=pred_x,
                 a=_a[t],
@@ -138,7 +137,7 @@ def loss_fn(
                 
                 #first case
                 n = len(_x[t + 1])
-                ot_loss = (ot_loss + (l / n) * jnp.linalg.norm(_x[t + 1] - _x_old_pred)**2) / (1 + l)
+                ot_loss = (ot_loss + (l / n) * jnp.linalg.norm(_x[t + 1] - _x_old_pred)**2) 
             if velo == "instantaneous":
                 # second case
                 n = len(_x[t ])

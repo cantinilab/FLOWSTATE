@@ -14,6 +14,9 @@ import scipy.sparse as sp
 import seaborn as sns
 import flowstate
 
+from typing import Sequence
+import plotly.graph_objects as go
+import plotly.express as px
 from anndata import AnnData
 import anndata as ad 
 from scipy.stats import ranksums
@@ -23,6 +26,12 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import SplineTransformer
 from tqdm import tqdm
+
+from ott.solvers.linear.sinkhorn import Sinkhorn
+from ott.solvers.linear.implicit_differentiation import ImplicitDiff
+from ott.geometry.pointcloud import PointCloud
+from ott.problems.linear.linear_problem import LinearProblem
+
 @dataclass
 class DataLoader:
     """DataLoader feeds data from an AnnData object to the model as JAX arrays. It
@@ -40,18 +49,17 @@ class DataLoader:
     adata: AnnData
     time_key: str
     omics_key: str
-    old_omics_key : str
+    velo_omics_key : str
     batch_size: int
     train_val_split: float                                                                    
     exclude_last : bool
     new_loss : bool 
     weight_key: str | None = None
-    full_batch : bool = False
+    
    
 
     def __post_init__(self) -> None:
         """Initialize the DataLoader."""
-        print('in the genral loss file')
         # Check that we have a valid time observation.
         assert_msg = "Time observations must be numeric."
         assert self.adata.obs[self.time_key].dtype.kind in "biuf", assert_msg
@@ -131,7 +139,7 @@ class DataLoader:
                 batch_idx = jax.random.choice(key_choice, idx_t, shape, replace=False) # pick shape random idx amongst train or val 
 
                 if self.weight_key:  # if weights for diff celll
-                    batch_a = self.adata.obs[self.weight_key].iloc[batch_idx].values
+                    batch_a = self.adata.obs[self.weight_key].iloc[batch_idx].values.copy()
                     batch_a /= batch_a.sum()
                 else:
                     batch_a = np.ones(shape[0])
@@ -161,7 +169,7 @@ class DataLoader:
             
             
             if self.new_loss : 
-                x_old.append(self.adata.obsm[self.old_omics_key][batch_idx])
+                x_old.append(self.adata.obsm[self.velo_omics_key][batch_idx])
             else : 
                 x_old.append( [])
             
@@ -386,6 +394,7 @@ def regress_genes(
 
 
 def tf_enrich(adata, df_tf, regression_key="regression", gene_key=None, n =20):
+
     
     
     #get only the gene that are TF targets 
@@ -436,3 +445,313 @@ def tf_enrich(adata, df_tf, regression_key="regression", gene_key=None, n =20):
     plt.title("Transcription factor enrichment scores")
     
     return tf_names.tolist(), df_tf_stats
+
+
+def pred(
+    adata: ad.AnnData,
+    time_key: str,
+    model,
+    omics_key: str
+):
+    """Transform the data given a subet of batches."""
+
+    # List timepoints and time differences between them.
+    timepoints = np.sort(adata.obs[time_key].unique())
+    
+
+    # Iterate over timepoints and transform the data.
+    for i, t in enumerate(timepoints[:-1]):
+        idx = (adata.obs[time_key] == t) 
+        adata.obsm["pred"][idx] = model.transform(
+            adata[idx], omics_key=omics_key, batch_size=1000
+        )
+
+def OT_plan(adata, time_obs, omics_key, epsilon=0.05,  weight_key = None ):
+    
+    # List timepoints and time differences between them.
+    timepoints = np.sort(adata.obs[time_obs].unique())
+    t_diff = np.diff(timepoints).astype(float)
+    #initialize Ot_plan 
+    P = sp.lil_matrix((adata.n_obs, adata.n_obs), dtype=float)
+
+    # For Sinkhorn, epsilon is defined in the Geometry.
+    # For FGW, it is defined in the solver.
+    
+    
+    for i, t in enumerate(timepoints[:-1]):
+        idx = (adata.obs[time_obs] == t) 
+        idx_next = (adata.obs[time_obs] == timepoints[i + 1])
+
+        if weight_key:  # if weights for diff celll
+            a = adata.obs.loc[idx, weight_key].values
+            a /= a.sum()
+
+            b = adata.obs.loc[idx_next, weight_key].values
+            b /= b.sum()
+            
+        else:
+            a = np.ones(idx.sum()) / idx.sum()
+            b = np.ones(idx_next.sum()) / idx_next.sum()
+
+        x= adata[idx].obsm["pred"]
+        y=  adata[idx_next].obsm[omics_key]
+
+        geom_yy = PointCloud(y, y, epsilon=epsilon)
+        geom_xx = PointCloud(x, x).copy_epsilon(geom_yy)
+        geom_xy = PointCloud(x, y).copy_epsilon(geom_yy)
+
+        # Define some hyperparameters.
+        implicit_diff = ImplicitDiff(symmetric=True)
+
+        # Compute the Sinkhorn loss between point clouds x and y.
+        problem = LinearProblem(geom_xy, a=a, b=b)
+        ott_solver = Sinkhorn(implicit_diff=implicit_diff)
+        solver = ott_solver(problem)
+        plan = solver.matrix
+
+        rows = np.where(idx)[0]
+        cols = np.where(idx_next)[0]
+        P[np.ix_(rows, cols)] = plan
+
+    adata.obsp["OT_plan"] = P.tocsr()
+     # (optional) keep a small mapping to retrieve which rows/cols correspond to each timepoint
+    adata.uns.setdefault("OT_plan_meta", {})
+    adata.uns["OT_plan_meta"]["timepoints"] = timepoints.tolist()
+    return adata
+
+def predict_transition_probabilities_KNN(
+    adata,
+    time_key: str,
+    type_key: str,
+    pred_key: str = "pred",
+    omics_key: str = "X",
+    k: int = 10,
+):
+    """
+    Train one global kNN classifier on all real cells.
+    Then, for each timepoint t, predict cell-type probabilities for
+    predicted cells at t -> t+Δt.
+    Returns a DataFrame of transition probabilities (cell × target cell type).
+    """
+    
+    timepoints = np.sort(adata.obs[time_key].unique())
+    all_results = []
+
+    # ------------------------------------------------------------
+    # 1) TRAIN kNN ON THE ENTIRE REAL DATASET
+    # ------------------------------------------------------------
+    X_real_all = adata.obsm[omics_key]
+    y_real_all = adata.obs[type_key].values
+
+    knn = KNeighborsClassifier(n_neighbors=k)
+    knn.fit(X_real_all, y_real_all)
+
+    classes = knn.classes_
+
+    # ------------------------------------------------------------
+    # 2) PREDICT PROBABILITIES PER TIMEPOINT
+    # ------------------------------------------------------------
+    for i, t in enumerate(timepoints[:-1]):
+        next_t = timepoints[i + 1]
+
+        # Extract predicted data (at time t, evolved to next_t)
+        idx_pred = (adata.obs[time_key] == t)
+        X_pred = adata.obsm[pred_key][idx_pred]
+
+        # Predict probabilities for each predicted cell
+        probs = knn.predict_proba(X_pred)
+
+        # Build results DataFrame
+        prob_df = pd.DataFrame(
+            probs,
+            index=adata.obs_names[idx_pred],
+            columns=classes
+        )
+
+        # Add metadata
+        prob_df["time_t"] = t
+        prob_df["time_t+dt"] = next_t
+        prob_df["source_type"] = adata.obs.loc[idx_pred, type_key].values
+
+        # Pick the most likely transition (argmax over columns)
+        prob_cols = prob_df.columns.difference(["time_t", "time_t+dt", "source_type"])
+        prob_df["pred_target_type"] = prob_df[prob_cols].idxmax(axis=1)
+
+        all_results.append(prob_df)
+
+    return pd.concat(all_results)
+
+def plot_transition_flow_chart(adata, transition_probs, weight_key=None,
+    time_key=None,
+    color_map=None,
+    top_n=None,normalization_type="total", min_flow=0.005):
+    """
+    Create a Sankey flow chart of weighted cell-type transitions across consecutive timepoints.
+
+    Parameters
+    ----------
+    adata : AnnData
+        AnnData object containing per-cell weights in `adata.obs[weight_key]`
+        and time labels in `adata.obs[time_key]`.
+    transition_probs : pd.DataFrame
+        DataFrame indexed by cell IDs (matching `adata.obs_names`) and containing:
+        - 'time_t'
+        - 'time_t+dt'
+        - 'source_type'
+        - 'pred_target_type'
+    weight_key : str
+        Column in `adata.obs` with per-cell weights.
+    time_key : str
+        Column in `adata.obs` with timepoint labels.
+    color_map : dict
+        Mapping {cell_type: color} used to color nodes (e.g. hex strings).
+
+    Returns
+    -------
+    fig : plotly.graph_objects.Figure
+        The Plotly Sankey figure (also displayed if in a notebook).
+    """
+
+    if time_key is None:
+        raise ValueError("time_key must be provided (column in adata.obs).")
+
+    # Collect all flows between consecutive timepoints
+    flows = []
+
+    timepoints = np.sort(adata.obs[time_key].unique())
+    for i, t in enumerate(timepoints[:-1]):
+        next_t = timepoints[i + 1]
+
+        # Subset transition probabilities for this time transition
+        subset = transition_probs[
+            (transition_probs["time_t"] == t) &
+            (transition_probs["time_t+dt"] == next_t)
+        ].copy()
+
+        # weights (weighted if key provided, else unweighted)
+        if (weight_key is None) :
+            weights = pd.Series(1.0, index=subset.index)
+        else:
+            weights = adata.obs.loc[subset.index, weight_key]
+
+        if normalization_type == "source":
+            # Weighted contingency table
+            weighted_table = (
+                pd.DataFrame({
+                    "source_type": subset["source_type"],
+                    "pred_target_type": subset["pred_target_type"],
+                    "weight": weights,
+                })
+                .pivot_table(
+                    index="source_type",
+                    columns="pred_target_type",
+                    values="weight",
+                    aggfunc="sum",
+                    fill_value=0,
+                )
+            )
+
+            # Normalize rows by total weight to get fractions
+            transition_counts = weighted_table.div(weighted_table.sum(axis=1), axis=0)
+
+        elif  normalization_type == "total":
+            #Build weighted long-format df
+            weighted_df = pd.DataFrame({
+                "source_type": subset["source_type"].values,
+                "pred_target_type": subset["pred_target_type"].values,
+                "weight": weights.values,
+            })
+
+            # Weighted transition table
+            weighted_transition = (
+                weighted_df.pivot_table(
+                    index="source_type",
+                    columns="pred_target_type",
+                    values="weight",
+                    aggfunc="sum",
+                    fill_value=0
+                )
+            )
+
+            # Total weighted mass per source type
+            total_source_weight = weighted_df.groupby("source_type")["weight"].sum()
+            total_weight = total_source_weight.sum()
+
+            # Fraction of whole system contributed by each source (weighted)
+            source_fraction = total_source_weight / total_weight
+
+            # Multiply each row by its global weighted fraction
+            for src in weighted_transition.index:
+                weighted_transition.loc[src, :] *= source_fraction[src]
+
+            # Normalize whole matrix so sum = 1
+            transition_counts = weighted_transition / weighted_transition.values.sum()
+
+        else :
+            raise ValueError(f"Unknown normalization_type: {normalization_type}")
+
+        # Store nonzero flows
+        for source in transition_counts.index:
+            row = transition_counts.loc[source]
+            if top_n is not None:
+               row= row.sort_values(ascending=False).head(top_n)
+            for target,value in row.items():
+                
+                if value > 0:
+                    flows.append((f"{source} (t={t})", f"{target} (t={next_t})", float(value)))
+
+    if len(flows) == 0:
+        raise ValueError("No nonzero flows found. Check your inputs (timepoints, transition_probs, weights).")
+    
+    # Optional: remove tiny flows
+    if min_flow is not None:
+        flows = [(s, t, v) for (s, t, v) in flows if v > min_flow]
+        
+    # Node labels and indices
+    labels = list(pd.unique([x for flow in flows for x in flow[:2]]))
+    label_to_idx = {label: i for i, label in enumerate(labels)}
+
+    source_idx = [label_to_idx[s] for s, _, _ in flows]
+    target_idx = [label_to_idx[t] for _, t, _ in flows]
+    values = [v for _, _, v in flows]
+
+        # Generate a color map automatically if none is provided
+    if color_map is None:
+        cell_types = pd.unique(
+            [x.split(" (t=")[0] for flow in flows for x in flow[:2]]
+        )
+        palette = px.colors.qualitative.Plotly
+        color_map = {
+            cell_type: palette[i % len(palette)]
+            for i, cell_type in enumerate(cell_types)
+        }
+
+    node_colors = [color_map[label.split(" (t=")[0]] for label in labels]
+    link_colors = [color_map[s.split(" (t=")[0]] for s, _, _ in flows]
+
+    node_colors = [color_map[label.split(" (t=")[0]] for label in labels]
+    link_colors = [color_map[s.split(" (t=")[0]] for s, _, _ in flows]
+
+    # Plot Sankey
+    fig = go.Figure(data=[go.Sankey(
+        node=dict(
+            pad=15,
+            thickness=20,
+            line=dict(color="black", width=0.5),
+            label=labels,
+            color=node_colors,
+        ),
+        link=dict(
+            source=source_idx,
+            target=target_idx,
+            value=values,
+            color=link_colors,
+        )
+    )])
+
+    fig.update_layout(title_text="Cell Type Transitions Across Timepoints", font_size=12, width=1500,
+    height=700)
+    fig.show()
+    return fig
+
+
