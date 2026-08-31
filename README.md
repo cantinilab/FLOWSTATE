@@ -22,7 +22,7 @@ By default, JAX is installed for CPU. To get the GPU version, use
 pip install flowstate jax[cuda12]==0.4.30
 ```
 
-refer to [JAX's docs](https://jax.readthedocs.io/en/latest/installation.html)). 
+refer to [JAX's docs](https://jax.readthedocs.io/en/latest/installation.html). 
 
 ### via GitHub (development version)
 
@@ -34,6 +34,6 @@ pip install ./flowstate/
 
 ## Getting started
 FlOWSTATE takes as an input an AnnData object, where omics information and labeled RNA information are stored in `obsm`, and `obs` contains time information.
-here you can find a [tutorial] (https://github.com/cantinilab/FLOWSTATE/tutorial.ipynb)
+here you can find a [tutorial](https://github.com/cantinilab/FLOWSTATE/blob/main/tutorial.ipynb).
 
 The code to reproduce the figure of the paper can be found here https://github.com/cantinilab/FLOWSTATE_reproducibility
