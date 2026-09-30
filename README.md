@@ -13,13 +13,13 @@ This folder contains the code used to train, evaluate, and analyze dynamical mod
 ### via PyPI
 The easiest way to install FLOWSTATE is via PyPI. The installation should take around a minute.  
 ```bash
-pip install flowstate
+pip install flowstate-omics
 ```
 
 By default, JAX is installed for CPU. To get the GPU version, use 
 
 ```bash
-pip install flowstate jax[cuda12]==0.4.30
+pip install flowstate-omics jax[cuda12]==0.4.30
 ```
 
 refer to [JAX's docs](https://jax.readthedocs.io/en/latest/installation.html). 
@@ -34,6 +34,6 @@ pip install ./flowstate/
 
 ## Getting started
 FlOWSTATE takes as an input an AnnData object, where omics information and labeled RNA information are stored in `obsm`, and `obs` contains time information.
-here you can find a [tutorial](https://github.com/cantinilab/FLOWSTATE/blob/main/tutorial.ipynb).
+Here you can find a [tutorial](https://github.com/cantinilab/FLOWSTATE/blob/main/tutorial.ipynb) and try the method yourself.
 
 The code to reproduce the figure of the paper can be found here https://github.com/cantinilab/FLOWSTATE_reproducibility

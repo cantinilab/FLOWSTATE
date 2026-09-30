@@ -79,7 +79,7 @@ class DataLoader:
         self.n_timepoints = len(self.timepoints)
         nb_cells = sum(len(idx) for idx in self.idx)
         self.size = int(self.batch_size *nb_cells  / self.n_timepoints)
-        print("the batch size is :", self.size)
+       
        
 
     def make_train_val_split(self, key: KeyArray) -> None:
@@ -751,7 +751,6 @@ def plot_transition_flow_chart(adata, transition_probs, weight_key=None,
 
     fig.update_layout(title_text="Cell Type Transitions Across Timepoints", font_size=12, width=1500,
     height=700)
-    fig.show()
     return fig
 
 
